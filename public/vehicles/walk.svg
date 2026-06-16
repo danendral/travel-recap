@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+  <!-- Walking figure, facing UP (north). No badge. -->
+  <g stroke="#ffffff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+    <circle cx="48" cy="22" r="11" fill="#38bdf8"/>
+    <path d="M48 33 L48 64 M48 42 L32 52 M48 42 L64 52 M48 64 L36 86 M48 64 L60 86"
+          fill="none" stroke="#38bdf8" stroke-width="9"/>
+    <path d="M48 33 L48 64 M48 42 L32 52 M48 42 L64 52 M48 64 L36 86 M48 64 L60 86"
+          fill="none" stroke="#ffffff" stroke-width="3"/>
+  </g>
+</svg>

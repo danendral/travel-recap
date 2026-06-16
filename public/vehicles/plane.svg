@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+  <!-- Standalone plane, no badge. Points UP (north); icon-rotate = bearing. -->
+  <path d="M48 6 L56 44 L86 62 L86 70 L52 58 L52 80 L62 87 L62 92 L48 87 L34 92 L34 87 L44 80 L44 58 L10 70 L10 62 L40 44 Z"
+        fill="#38bdf8" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round"/>
+</svg>
