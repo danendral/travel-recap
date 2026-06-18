@@ -211,13 +211,15 @@ export default function MapCanvas() {
 
   const activeTripId = useStore((s) => s.activeTripId);
   const addWaypoint = useStore((s) => s.addWaypoint);
+  const removeWaypoint = useStore((s) => s.removeWaypoint);
   const { waypoints, orderedWaypoints, segments, trip } = useTripData();
 
   // Keep the latest values available to the (stable) click handler.
-  const clickCtx = useRef({ activeTripId, addWaypoint, count: 0 });
+  const clickCtx = useRef({ activeTripId, addWaypoint, removeWaypoint, count: 0 });
   clickCtx.current = {
     activeTripId,
     addWaypoint,
+    removeWaypoint,
     count: orderedWaypoints.length,
   };
 
@@ -242,9 +244,79 @@ export default function MapCanvas() {
     // Bottom-right so it doesn't collide with the Export button (top-right).
     map.addControl(new maplibregl.NavigationControl(), "bottom-right");
 
+    // The two circle layers that make up a waypoint marker; hovering/clicking
+    // either should target the underlying waypoint.
+    const WAYPOINT_LAYERS = ["tr-waypoint-dot", "tr-waypoint-glow"];
+
+    // A tiny "click to remove" tooltip shown while hovering a waypoint. It's a
+    // DOM popup (not a GL layer) — fine here because it's a transient UI hint
+    // that never needs to appear in the exported video.
+    const removeHint = new maplibregl.Popup({
+      closeButton: false,
+      closeOnClick: false,
+      offset: 16,
+      className: "tr-remove-hint",
+    });
+
+    const onEnter = (e: maplibregl.MapLayerMouseEvent) => {
+      map.getCanvas().style.cursor = "pointer";
+      const id = e.features?.[0]?.properties?.id as Id | undefined;
+      if (!id) return;
+      removeHint
+        .setLngLat(e.lngLat)
+        .setHTML("<span>Click to remove</span>")
+        .addTo(map);
+    };
+    const onMove = (e: maplibregl.MapLayerMouseEvent) => {
+      // Keep the hint pinned to the cursor while moving over the marker.
+      removeHint.setLngLat(e.lngLat);
+    };
+    const onLeave = () => {
+      map.getCanvas().style.cursor = "";
+      removeHint.remove();
+    };
+    const onClick = (e: maplibregl.MapLayerMouseEvent) => {
+      const { activeTripId, removeWaypoint } = clickCtx.current;
+      const id = e.features?.[0]?.properties?.id as Id | undefined;
+      if (!activeTripId || !id) return;
+      removeWaypoint(activeTripId, id);
+      removeHint.remove();
+      map.getCanvas().style.cursor = "";
+    };
+
+    // Register the waypoint hover/click handlers ONCE per map. Pass BOTH circle
+    // layers as a single array so MapLibre treats them as one combined hit area
+    // and fires each handler once — binding per-layer in a loop would double-fire
+    // `onClick` (removing twice) and flicker the hint as the cursor crosses from
+    // the dot to its surrounding glow.
+    //
+    // These are MapLibre *delegated* listeners (bound to layer ids), stored on
+    // the Map instance — NOT on the style — so they survive `setStyle()` and keep
+    // working after a basemap swap. Re-registering them in the style-swap reapply
+    // path would double-fire every handler, so deliberately don't.
+    map.on("mouseenter", WAYPOINT_LAYERS, onEnter);
+    map.on("mousemove", WAYPOINT_LAYERS, onMove);
+    map.on("mouseleave", WAYPOINT_LAYERS, onLeave);
+    map.on("click", WAYPOINT_LAYERS, onClick);
+
     map.on("load", () => addAppLayers(map));
 
     map.on("click", (e) => {
+      // A click that landed on a waypoint is a "remove" (handled by onClick on
+      // the layer) — don't also drop a new waypoint on top of it. Detect that by
+      // querying the rendered waypoint layers at the click point, which is
+      // order-independent (no reliance on which click handler fires first).
+      // Only query layers that currently exist: queryRenderedFeatures throws on
+      // an unknown layer id, and the waypoint layers are briefly absent mid
+      // `setStyle()`.
+      const presentLayers = WAYPOINT_LAYERS.filter((l) => map.getLayer(l));
+      if (presentLayers.length > 0) {
+        const onWaypoint = map.queryRenderedFeatures(e.point, {
+          layers: presentLayers,
+        });
+        if (onWaypoint.length > 0) return;
+      }
+
       const { activeTripId, addWaypoint, count } = clickCtx.current;
       if (!activeTripId) return;
       addWaypoint(activeTripId, {
