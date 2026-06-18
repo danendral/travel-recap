@@ -29,3 +29,25 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* "Click to remove" hint shown when hovering a waypoint marker. Overrides
+   MapLibre's default light popup so it reads as a dark tooltip and never steals
+   the cursor (otherwise it'd block the click that removes the waypoint). */
+.tr-remove-hint {
+  pointer-events: none;
+}
+.tr-remove-hint .maplibregl-popup-content {
+  background: #0b1120;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 6px 10px;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.4);
+  white-space: nowrap;
+}
+.tr-remove-hint .maplibregl-popup-tip {
+  border-top-color: #0b1120;
+  border-bottom-color: #0b1120;
+}
