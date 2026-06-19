@@ -22,6 +22,7 @@ import {
   routingProfileFor,
 } from "@/lib/pathing/geometry";
 import { buildTimeline } from "@/lib/pathing/interpolate";
+import { SAMPLE_TRIP } from "@/lib/sampleTrip";
 
 const uid = (): Id => crypto.randomUUID();
 const now = () => new Date().toISOString();
@@ -32,6 +33,8 @@ interface TravelRecapStore {
   waypoints: Record<Id, Waypoint>;
   segments: Record<Id, PathSegment>;
   activeTripId: Id | null;
+  /** True once the first-run sample trip has been seeded (one-time). */
+  hasSeeded: boolean;
 
   // --- Transient UI state (never persisted) ---
   playback: PlaybackState;
@@ -40,6 +43,12 @@ interface TravelRecapStore {
   // --- Trip lifecycle ---
   createTrip(name?: string): Id;
   setActiveTrip(tripId: Id): void;
+  renameTrip(tripId: Id, name: string): void;
+  deleteTrip(tripId: Id): void;
+  duplicateTrip(tripId: Id): Id;
+  /** Builds the first-run iconic sample trip and returns its id. */
+  seedSampleTrip(): Id;
+  markSeeded(): void;
 
   // --- Waypoints ---
   addWaypoint(tripId: Id, wp: Omit<Waypoint, "id">): Id;
@@ -170,6 +179,7 @@ export const useStore = create<TravelRecapStore>()(
       waypoints: {},
       segments: {},
       activeTripId: null,
+      hasSeeded: false,
       playback: initialPlayback,
       export: initialExport,
 
@@ -214,6 +224,102 @@ export const useStore = create<TravelRecapStore>()(
         void get().upgradeDriveRoutes(tripId);
       },
 
+      renameTrip(tripId, name) {
+        set((s) => {
+          const trip = s.trips[tripId];
+          if (!trip) return;
+          trip.name = name;
+          trip.updatedAt = now();
+        });
+      },
+
+      deleteTrip(tripId) {
+        set((s) => {
+          const trip = s.trips[tripId];
+          if (!trip) return;
+          for (const wid of trip.waypointIds) {
+            const wp = s.waypoints[wid];
+            if (wp?.photo?.objectUrl) URL.revokeObjectURL(wp.photo.objectUrl);
+            delete s.waypoints[wid];
+          }
+          for (const sid of trip.segmentIds) delete s.segments[sid];
+          delete s.trips[tripId];
+          if (s.activeTripId === tripId) {
+            s.activeTripId = Object.keys(s.trips)[0] ?? null;
+          }
+        });
+      },
+
+      duplicateTrip(tripId) {
+        const newId = uid();
+        set((s) => {
+          const trip = s.trips[tripId];
+          if (!trip) return;
+          // Map every old waypoint/segment id to a fresh one so the copy shares
+          // no entity ids with the original.
+          const idMap = new Map<Id, Id>();
+          const waypointIds = trip.waypointIds.map((wid) => {
+            const nid = uid();
+            idMap.set(wid, nid);
+            const wp = s.waypoints[wid];
+            s.waypoints[nid] = {
+              ...wp,
+              id: nid,
+              // Object URLs aren't clonable/persisted — drop, keep the thumb.
+              photo: wp.photo ? { ...wp.photo, objectUrl: "" } : undefined,
+            };
+            return nid;
+          });
+          const segmentIds = trip.segmentIds.map((sid) => {
+            const nsid = uid();
+            const seg = s.segments[sid];
+            s.segments[nsid] = {
+              ...seg,
+              id: nsid,
+              fromWaypointId: idMap.get(seg.fromWaypointId)!,
+              toWaypointId: idMap.get(seg.toWaypointId)!,
+              geometry: seg.geometry ? [...seg.geometry] : undefined,
+            };
+            return nsid;
+          });
+          s.trips[newId] = {
+            ...trip,
+            id: newId,
+            name: `${trip.name} (copy)`,
+            waypointIds,
+            segmentIds,
+            createdAt: now(),
+            updatedAt: now(),
+          };
+        });
+        return newId;
+      },
+
+      seedSampleTrip() {
+        const tripId = get().createTrip(SAMPLE_TRIP.name);
+        for (const stop of SAMPLE_TRIP.stops) {
+          get().addWaypoint(tripId, {
+            position: stop.position,
+            label: stop.label,
+          });
+        }
+        // Set each segment's vehicle in order (createTrip/addWaypoint derived
+        // the segments; ids are stable in waypoint order).
+        const segIds = get().trips[tripId]?.segmentIds ?? [];
+        SAMPLE_TRIP.vehicles.forEach((v, i) => {
+          const sid = segIds[i];
+          if (sid) get().setSegmentVehicle(sid, v);
+        });
+        get().markSeeded();
+        return tripId;
+      },
+
+      markSeeded() {
+        set((s) => {
+          s.hasSeeded = true;
+        });
+      },
+
       addWaypoint(tripId, wp) {
         const id = uid();
         set((s) => {
@@ -221,6 +327,15 @@ export const useStore = create<TravelRecapStore>()(
           if (!trip) return;
           s.waypoints[id] = { ...wp, id };
           trip.waypointIds.push(id);
+          // Auto-name a still-default trip from its first stop, so the trip is
+          // recognizable in the dashboard without the user naming it. A trip
+          // the user already renamed is left untouched.
+          if (
+            trip.waypointIds.length === 1 &&
+            (trip.name === "Untitled trip" || trip.name === "My trip")
+          ) {
+            trip.name = `Trip to ${wp.label}`;
+          }
           rederiveSegments(trip, s.waypoints, s.segments);
           s.playback.totalDurationMs = totalDurationFor(trip, s.segments);
         });
@@ -354,6 +469,7 @@ export const useStore = create<TravelRecapStore>()(
         waypoints: s.waypoints,
         segments: s.segments,
         activeTripId: s.activeTripId,
+        hasSeeded: s.hasSeeded,
       }),
     },
   ),
