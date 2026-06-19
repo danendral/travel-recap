@@ -260,16 +260,21 @@ export default function MapCanvas() {
 
     const onEnter = (e: maplibregl.MapLayerMouseEvent) => {
       map.getCanvas().style.cursor = "pointer";
-      const id = e.features?.[0]?.properties?.id as Id | undefined;
+      const feature = e.features?.[0];
+      const id = feature?.properties?.id as Id | undefined;
       if (!id) return;
+      // Anchor the hint to the WAYPOINT's own coordinates, not the cursor, so it
+      // sits steadily above the dot and doesn't drift as the pointer moves around
+      // inside the (fairly large) hit area.
+      const geom = feature?.geometry;
+      const at: [number, number] =
+        geom?.type === "Point"
+          ? (geom.coordinates as [number, number])
+          : [e.lngLat.lng, e.lngLat.lat];
       removeHint
-        .setLngLat(e.lngLat)
+        .setLngLat(at)
         .setHTML("<span>Click to remove</span>")
         .addTo(map);
-    };
-    const onMove = (e: maplibregl.MapLayerMouseEvent) => {
-      // Keep the hint pinned to the cursor while moving over the marker.
-      removeHint.setLngLat(e.lngLat);
     };
     const onLeave = () => {
       map.getCanvas().style.cursor = "";
@@ -288,14 +293,14 @@ export default function MapCanvas() {
     // layers as a single array so MapLibre treats them as one combined hit area
     // and fires each handler once — binding per-layer in a loop would double-fire
     // `onClick` (removing twice) and flicker the hint as the cursor crosses from
-    // the dot to its surrounding glow.
+    // the dot to its surrounding glow. No `mousemove` handler: the hint is pinned
+    // to the dot in `onEnter` and intentionally stays put as the cursor moves.
     //
     // These are MapLibre *delegated* listeners (bound to layer ids), stored on
     // the Map instance — NOT on the style — so they survive `setStyle()` and keep
     // working after a basemap swap. Re-registering them in the style-swap reapply
     // path would double-fire every handler, so deliberately don't.
     map.on("mouseenter", WAYPOINT_LAYERS, onEnter);
-    map.on("mousemove", WAYPOINT_LAYERS, onMove);
     map.on("mouseleave", WAYPOINT_LAYERS, onLeave);
     map.on("click", WAYPOINT_LAYERS, onClick);
 
