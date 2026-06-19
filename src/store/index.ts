@@ -16,7 +16,11 @@ import {
   DEFAULT_STYLE_ID,
   RESOLUTION_BY_RATIO,
 } from "@/lib/constants";
-import { resolveSegmentGeometry, fetchDriveRoute } from "@/lib/pathing/geometry";
+import {
+  resolveSegmentGeometry,
+  fetchRoute,
+  routingProfileFor,
+} from "@/lib/pathing/geometry";
 import { buildTimeline } from "@/lib/pathing/interpolate";
 
 const uid = (): Id => crypto.randomUUID();
@@ -275,11 +279,15 @@ export const useStore = create<TravelRecapStore>()(
           );
 
         // Fetch sequentially to respect the public OSRM server's ~1 req/s limit.
+        // A failed leg keeps its straight-line "fallback" (approximate) and
+        // does NOT abort the rest of the trip.
         for (const seg of todo) {
+          const profile = routingProfileFor(seg.vehicleType);
+          if (!profile) continue; // train/boat/plane don't snap to a network
           const from = get().waypoints[seg.fromWaypointId]?.position;
           const to = get().waypoints[seg.toWaypointId]?.position;
           if (!from || !to) continue;
-          const road = await fetchDriveRoute(from, to);
+          const road = await fetchRoute(from, to, profile);
           if (!road) continue; // keep the straight-line fallback on failure
           set((s) => {
             const live = s.segments[seg.id];

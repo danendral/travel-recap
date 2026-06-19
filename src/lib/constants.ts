@@ -65,6 +65,13 @@ export const INITIAL_VIEW = {
   bearing: 0,
 };
 
+/**
+ * Routing server base. The public OSRM demo server for now (fine for dev / low
+ * volume, ~1 req/s, non-commercial). Isolated as a constant so a self-hosted or
+ * backend router can replace it later without touching call sites.
+ */
+export const OSRM_BASE = "https://router.project-osrm.org";
+
 /** Default animation time spent traversing a single leg. */
 export const DEFAULT_SEGMENT_DURATION_MS = 3000;
 

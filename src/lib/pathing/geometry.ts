@@ -1,7 +1,8 @@
 import { greatCircle } from "@turf/great-circle";
 import { point } from "@turf/helpers";
 import type { Feature, LineString, MultiLineString } from "geojson";
-import type { LngLat, TravelMode } from "@/types";
+import type { LngLat, TravelMode, VehicleType } from "@/types";
+import { OSRM_BASE } from "@/lib/constants";
 
 /**
  * Resolves the INITIAL drawable geometry for a segment, synchronously.
@@ -23,39 +24,80 @@ export function resolveSegmentGeometry(
   return [from, to];
 }
 
+/** OSRM routing profiles we support. Car follows roads; walk follows paths. */
+export type RoutingProfile = "driving" | "foot";
+
 /**
- * Fetches a road-following route between two points from the public OSRM demo
- * server, returning the path as [lng,lat] points. Resolves to `null` on any
- * failure so callers keep the straight-line fallback.
- *
- * The public OSRM server is fine for dev/low volume (1 req/s, non-commercial);
- * production should self-host. Routes are fetched once at edit time and cached
- * on the segment, so playback/export make zero requests.
+ * The OSRM profile for a vehicle, or `null` for modes that DON'T snap to a
+ * routed network: plane (great-circle arc), train/boat (free rail/sea routing
+ * is unreliable, so they keep a smooth straight/great-circle line).
  */
-export async function fetchDriveRoute(
+export function routingProfileFor(v: VehicleType): RoutingProfile | null {
+  if (v === "car") return "driving";
+  if (v === "walk") return "foot";
+  return null;
+}
+
+const ROUTE_TIMEOUT_MS = 6000;
+
+/**
+ * Fetches a network-following route between two points from OSRM, returning the
+ * path as [lng,lat] points, or `null` on failure (callers keep the straight
+ * line and mark the leg "fallback"/approximate).
+ *
+ * Resilient: a per-attempt timeout (the public demo server can hang) and ONE
+ * retry on a transient failure (network error or 5xx). A genuine "no route"
+ * answer is NOT retried. Routes are fetched once at edit time and cached on the
+ * segment, so playback/export make zero requests.
+ */
+export async function fetchRoute(
   from: LngLat,
   to: LngLat,
+  profile: RoutingProfile,
   signal?: AbortSignal,
 ): Promise<LngLat[] | null> {
   const coords = `${from[0]},${from[1]};${to[0]},${to[1]}`;
   const url =
-    `https://router.project-osrm.org/route/v1/driving/${coords}` +
+    `${OSRM_BASE}/route/v1/${profile}/${coords}` +
     `?overview=full&geometries=geojson`;
-  try {
-    const res = await fetch(url, { signal });
-    if (!res.ok) return null;
-    const data = (await res.json()) as {
-      code: string;
-      routes?: Array<{ geometry: { coordinates: [number, number][] } }>;
-    };
-    if (data.code !== "Ok" || !data.routes?.length) return null;
-    const line = data.routes[0].geometry.coordinates;
-    if (line.length < 2) return null;
-    return line.map((c) => [c[0], c[1]]);
-  } catch {
-    return null; // network error / abort → caller keeps the straight line
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const ctrl = new AbortController();
+    const onAbort = () => ctrl.abort();
+    signal?.addEventListener("abort", onAbort);
+    const timer = setTimeout(() => ctrl.abort(), ROUTE_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal });
+      if (!res.ok) {
+        if (res.status >= 500 && attempt === 0) continue; // transient — retry
+        return null;
+      }
+      const data = (await res.json()) as {
+        code: string;
+        routes?: Array<{ geometry: { coordinates: [number, number][] } }>;
+      };
+      if (data.code !== "Ok" || !data.routes?.length) return null; // no route
+      const line = data.routes[0].geometry.coordinates;
+      if (line.length < 2) return null;
+      return line.map((c) => [c[0], c[1]]);
+    } catch {
+      if (signal?.aborted) return null; // genuine cancel by caller
+      if (attempt === 0) continue; // transient (network/timeout) — retry once
+      return null;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    }
   }
+  return null;
 }
+
+/** @deprecated use `fetchRoute(from, to, "driving", signal)`. */
+export const fetchDriveRoute = (
+  from: LngLat,
+  to: LngLat,
+  signal?: AbortSignal,
+): Promise<LngLat[] | null> => fetchRoute(from, to, "driving", signal);
 
 /**
  * Great-circle arc between two points as a single continuous polyline.
