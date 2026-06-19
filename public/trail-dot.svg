@@ -1,5 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="96" height="32" viewBox="0 0 96 32">
-  <!-- Short rounded dash, drawn at higher res so it stays crisp when scaled.
-       Wider than tall so it reads as a segment of a dotted LINE. -->
-  <rect x="4" y="6" width="88" height="20" rx="10" fill="#7dd3fc"/>
-</svg>

@@ -7,7 +7,8 @@ import type { Feature, FeatureCollection, Point } from "geojson";
 import { useStore } from "@/store";
 import { DEFAULT_MAP_STYLE, INITIAL_VIEW, styleUrlFor } from "@/lib/constants";
 import { useTripData } from "@/store/selectors";
-import { TRAIL_SOURCE, VEHICLE_SOURCE } from "@/lib/map/applyFrame";
+import { ROUTE_SOURCE, VEHICLE_SOURCE, setRouteGeometry } from "@/lib/map/applyFrame";
+import { buildRouteLine } from "@/lib/pathing/interpolate";
 import type { Id, VehicleType } from "@/types";
 
 const WAYPOINT_SOURCE = "tr-waypoints";
@@ -28,8 +29,8 @@ const ICON_PX = 96; // raster size of the source SVG (high-res; icon-size scales
  * (north); `icon-rotate = bearing` then aligns them to heading.
  */
 async function registerVehicleIcons(map: MlMap) {
-  await Promise.all([
-    ...VEHICLE_ICONS.map(async (type) => {
+  await Promise.all(
+    VEHICLE_ICONS.map(async (type) => {
       const id = `veh-${type}`;
       if (map.hasImage(id)) return;
       try {
@@ -39,17 +40,7 @@ async function registerVehicleIcons(map: MlMap) {
         // Non-fatal: a missing icon just hides that vehicle, not the app.
       }
     }),
-    // The trail dot, placed evenly along the route as a symbol (see addAppLayers).
-    (async () => {
-      if (map.hasImage("trail-dot")) return;
-      try {
-        const data = await rasterizeSvg("/trail-dot.svg", 96, 32); // dash: wide, short, hi-res
-        if (!map.hasImage("trail-dot")) map.addImage("trail-dot", data, { pixelRatio: 2 });
-      } catch {
-        /* non-fatal */
-      }
-    })(),
-  ]);
+  );
 }
 
 /** Draws an SVG URL onto an offscreen canvas and returns its RGBA ImageData. */
@@ -84,52 +75,70 @@ function rasterizeSvg(
 function addAppLayers(map: MlMap) {
   void registerVehicleIcons(map);
 
-  // NOTE: no full-route preview line. The route is revealed progressively by
-  // the trail below (start → current stop), and only the final overview beat
-  // shows the whole route. This matches the requested reveal behavior.
-
-  // Bright trail — the portion drawn so far behind the moving vehicle.
-  if (!map.getSource(TRAIL_SOURCE)) {
-    map.addSource(TRAIL_SOURCE, { type: "geojson", data: emptyCollection() });
-  }
-  // Dotted trail as evenly-spaced SYMBOL dashes along the line — NOT a
-  // line-dasharray (which re-flows as the line grows, making the moving head
-  // look different from the settled part).
+  // The route trail is ONE stable polyline (the whole trip), set once per
+  // trip-shape change — never grown per frame. Progress is revealed by moving a
+  // `line-gradient` stop (see applyFrameToMap), so dashes never re-flow. This
+  // is the fix for the "different route in each playback phase" artifact.
   //
-  // Both the dash LENGTH (icon-size) and the dash SPACING scale ×2 per zoom
-  // level, so the dashes are pinned to a fixed MAP distance and their
-  // length:gap ratio is constant — the trail looks identical at any zoom and in
-  // both the moving and settled phases. (Anchored at zoom 6: ~16px dash, ~40px
-  // period → "medium" dashes with gap ≈ 1.5× dash.)
+  // `lineMetrics: true` is REQUIRED for the `line-progress` expression the
+  // reveal gradient uses.
+  if (!map.getSource(ROUTE_SOURCE)) {
+    map.addSource(ROUTE_SOURCE, {
+      type: "geojson",
+      lineMetrics: true,
+      data: emptyCollection(),
+    });
+  }
+  // 1) Soft glow underlay — a wide, blurred, dim solid line along the whole
+  //    route. Gives the trail a premium "lit" feel.
   map.addLayer({
-    id: "tr-trail-line",
-    type: "symbol",
-    source: TRAIL_SOURCE,
-    layout: {
-      "symbol-placement": "line",
-      "symbol-spacing": [
+    id: "tr-route-glow",
+    type: "line",
+    source: ROUTE_SOURCE,
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: {
+      "line-color": "#38bdf8",
+      "line-width": 9,
+      "line-opacity": 0.16,
+      "line-blur": 6,
+    },
+  });
+  // 2) Upcoming track — dim dashed line over the FULL route, so viewers see
+  //    where the trip is heading. Constant; never animated.
+  map.addLayer({
+    id: "tr-route-upcoming",
+    type: "line",
+    source: ROUTE_SOURCE,
+    layout: { "line-cap": "butt", "line-join": "round" },
+    paint: {
+      "line-color": "#64748b",
+      "line-width": 2.5,
+      "line-opacity": 0.45,
+      "line-dasharray": [1.6, 1.8],
+    },
+  });
+  // 3) Traveled — bright dashed line on the SAME stable geometry, clipped to
+  //    the vehicle via a `line-gradient` alpha ramp (set per frame). Identical
+  //    dash array to the upcoming layer so the two read as one continuous
+  //    dashed route, just brighter behind the vehicle.
+  map.addLayer({
+    id: "tr-route-traveled",
+    type: "line",
+    source: ROUTE_SOURCE,
+    layout: { "line-cap": "butt", "line-join": "round" },
+    paint: {
+      "line-width": 3.5,
+      "line-dasharray": [1.6, 1.8],
+      // Initial gradient (nothing revealed yet); applyFrameToMap updates it.
+      "line-gradient": [
         "interpolate",
-        ["exponential", 2],
-        ["zoom"],
-        3, 5,
-        6, 40,
-        11, 1280,
+        ["linear"],
+        ["line-progress"],
+        0,
+        "rgba(125,211,252,0)",
+        1,
+        "rgba(125,211,252,0)",
       ],
-      "icon-image": "trail-dot",
-      "icon-size": [
-        "interpolate",
-        ["exponential", 2],
-        ["zoom"],
-        3, 0.33 / 8,
-        6, 0.33,
-        11, 0.33 * 32,
-      ],
-      "icon-allow-overlap": true,
-      "icon-ignore-placement": true,
-      // Orient each dash ALONG the route (symbol-placement:line auto-rotates to
-      // the line direction); keep-upright off so it doesn't flip mid-curve.
-      "icon-rotation-alignment": "map",
-      "icon-keep-upright": false,
     },
   });
 
@@ -352,11 +361,14 @@ export default function MapCanvas() {
       const wpSource = map.getSource(WAYPOINT_SOURCE) as GeoJSONSource | undefined;
       if (!wpSource) return;
       wpSource.setData(waypointFeatures(orderedWaypoints));
+      // Set the whole-route polyline ONCE per trip-shape change (this effect's
+      // deps). Never per frame — that's what keeps the dashed trail seamless.
+      if (trip) setRouteGeometry(map, buildRouteLine(trip, segments, waypoints));
     };
 
     if (map.isStyleLoaded()) apply();
     else map.once("load", apply);
-  }, [orderedWaypoints, segments, waypoints, trip?.segmentIds]);
+  }, [orderedWaypoints, segments, waypoints, trip, trip?.segmentIds]);
 
   // --- Swap basemap style when the trip's style id changes ---
   const styleId = trip?.mapStyleId;
@@ -379,6 +391,8 @@ export default function MapCanvas() {
       if (!map.getLayer("tr-vehicle-icon")) addAppLayers(map);
       const wpSource = map.getSource(WAYPOINT_SOURCE) as GeoJSONSource | undefined;
       wpSource?.setData(waypointFeatures(orderedWaypoints));
+      // Re-set the route line — setStyle() wiped the source.
+      if (trip) setRouteGeometry(map, buildRouteLine(trip, segments, waypoints));
     };
     // `style.load` fires once when the new style (and its sprite/glyphs) is
     // ready — the correct hook to re-add our wiped sources/layers/images.

@@ -1,23 +1,52 @@
 import type { Map as MlMap, GeoJSONSource } from "maplibre-gl";
-import type { FeatureCollection, LineString, Point } from "geojson";
+import type { FeatureCollection, Point } from "geojson";
 import type { Id, LngLat, PathSegment, Trip, Waypoint } from "@/types";
-import {
-  type AnimationFrame,
-  sliceAlongPolyline,
-} from "@/lib/pathing/interpolate";
+import type { AnimationFrame } from "@/lib/pathing/interpolate";
 
 export const VEHICLE_SOURCE = "tr-vehicle";
-export const TRAIL_SOURCE = "tr-trail";
+export const ROUTE_SOURCE = "tr-route";
 export const WAYPOINT_SOURCE = "tr-waypoints";
+
+// Trail palette. Traveled = bright cyan; the reveal gradient fades to fully
+// transparent past the vehicle so only the dim "upcoming" layer shows ahead.
+const TRAVELED_COLOR = "#7dd3fc";
+const TRAVELED_CLEAR = "rgba(125,211,252,0)";
+
+/**
+ * Sets the WHOLE-route polyline as the trail source's geometry. Called ONCE per
+ * trip-shape change (add/remove/reorder/reroute) — never per animation frame.
+ * Keeping the geometry constant during playback is what makes the dashed trail
+ * seamless: MapLibre only re-lays a dash pattern when the feature changes, so a
+ * fixed line keeps every dash pinned in the moving, arrived, and next-leg
+ * phases alike.
+ */
+export function setRouteGeometry(map: MlMap, line: LngLat[]): void {
+  const src = map.getSource(ROUTE_SOURCE) as GeoJSONSource | undefined;
+  if (!src) return;
+  src.setData(
+    line.length >= 2
+      ? {
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              geometry: { type: "LineString", coordinates: line },
+              properties: {},
+            },
+          ],
+        }
+      : emptyCollection(),
+  );
+}
 
 /**
  * Single source of truth for pushing one animation frame onto the map: the
- * moving vehicle marker (a one-feature symbol source) and the progressive trail
- * (the drawn-so-far portion of completed + active segments).
+ * moving vehicle marker, the trail REVEAL (a line-gradient on the stable route
+ * line), and the arrived-stop labels.
  *
- * Called by BOTH the real-time playback rAF loop AND the scrubber AND (later)
- * the deterministic export loop — so all three render identically. It only
- * reads the store-provided trip/segments and writes to GeoJSON sources; it
+ * Called by the playback rAF loop, the scrubber, AND (later) the deterministic
+ * export loop — so all three render identically. It only sets the vehicle/
+ * waypoint GeoJSON and one paint property; it never rebuilds route geometry and
  * never triggers React renders.
  */
 export function applyFrameToMap(
@@ -28,11 +57,30 @@ export function applyFrameToMap(
   waypoints: Record<Id, Waypoint>,
 ) {
   const vehicleSrc = map.getSource(VEHICLE_SOURCE) as GeoJSONSource | undefined;
-  const trailSrc = map.getSource(TRAIL_SOURCE) as GeoJSONSource | undefined;
-  if (!vehicleSrc || !trailSrc) return;
+  if (!vehicleSrc) return;
 
   vehicleSrc.setData(vehicleFeature(frame, segments, trip));
-  trailSrc.setData(trailFeature(frame, trip, segments, waypoints));
+
+  // Reveal the traveled portion by moving a single gradient stop — NO geometry
+  // change. Everything up to routeProgress is bright; past it is transparent
+  // (the dim full-length "upcoming" layer shows through). Clamp off the exact
+  // 0/1 ends so the interpolation stays well-formed.
+  if (map.getLayer("tr-route-traveled")) {
+    const p = Math.max(0.0001, Math.min(0.9999, frame.routeProgress));
+    map.setPaintProperty("tr-route-traveled", "line-gradient", [
+      "interpolate",
+      ["linear"],
+      ["line-progress"],
+      0,
+      TRAVELED_COLOR,
+      p,
+      TRAVELED_COLOR,
+      Math.min(1, p + 0.001),
+      TRAVELED_CLEAR,
+      1,
+      TRAVELED_CLEAR,
+    ]);
+  }
 
   // Reveal labels only for stops that have been arrived at.
   const wpSrc = map.getSource(WAYPOINT_SOURCE) as GeoJSONSource | undefined;
@@ -68,17 +116,6 @@ export function waypointFeatures(
   };
 }
 
-function pathFor(
-  seg: PathSegment | undefined,
-  waypoints: Record<Id, Waypoint>,
-): LngLat[] {
-  if (!seg) return [];
-  if (seg.geometry && seg.geometry.length > 1) return seg.geometry;
-  const a = waypoints[seg.fromWaypointId]?.position;
-  const b = waypoints[seg.toWaypointId]?.position;
-  return a && b ? [a, b] : [];
-}
-
 function vehicleFeature(
   frame: AnimationFrame,
   segments: Record<Id, PathSegment>,
@@ -105,55 +142,6 @@ function vehicleFeature(
   };
 }
 
-/**
- * The drawn trail as ONE continuous polyline: every fully-completed segment
- * concatenated with the active segment cut at `segmentDrawProgress`.
- *
- * Concatenating into a single LineString (rather than one feature per segment)
- * is what keeps the dotted pattern uniform — MapLibre restarts a dash pattern
- * at the start of every feature, so multiple features would show inconsistent
- * dotting at segment joins (the "two different versions" the trail had between
- * the moving and arrived phases).
- */
-function trailFeature(
-  frame: AnimationFrame,
-  trip: Trip,
-  segments: Record<Id, PathSegment>,
-  waypoints: Record<Id, Waypoint>,
-): FeatureCollection<LineString> {
-  const activeIdx = frame.activeSegmentIndex;
-  // Segments fully behind us: during a segment that's its index; during a dwell
-  // it's all segments up to the stop we're arriving at.
-  const completedCount =
-    activeIdx >= 0 ? activeIdx : Math.max(0, frame.arrivingIndex);
-
-  const coords: LngLat[] = [];
-  const pushSeg = (pts: LngLat[]) => {
-    for (const p of pts) {
-      // Avoid duplicating the shared vertex where one segment meets the next.
-      const last = coords[coords.length - 1];
-      if (!last || last[0] !== p[0] || last[1] !== p[1]) coords.push(p);
-    }
-  };
-
-  for (let i = 0; i < completedCount; i++) {
-    pushSeg(pathFor(segments[trip.segmentIds[i]], waypoints));
-  }
-  if (activeIdx >= 0) {
-    const pts = pathFor(segments[trip.segmentIds[activeIdx]], waypoints);
-    pushSeg(sliceAlongPolyline(pts, frame.segmentDrawProgress));
-  }
-
-  const features =
-    coords.length >= 2
-      ? [
-          {
-            type: "Feature" as const,
-            geometry: { type: "LineString" as const, coordinates: coords },
-            properties: {},
-          },
-        ]
-      : [];
-
-  return { type: "FeatureCollection", features };
+function emptyCollection(): FeatureCollection {
+  return { type: "FeatureCollection", features: [] };
 }
