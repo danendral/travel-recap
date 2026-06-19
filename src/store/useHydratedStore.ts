@@ -10,23 +10,26 @@ import { useStore } from "@/store";
  * race the rehydrate and can duplicate or miss saved trips.
  *
  * Shared by the dashboard and the editor route.
+ *
+ * Must start `false` and flip to `true` only in an effect: the hook renders on
+ * the server too, where `useStore.persist` state isn't meaningful, and starting
+ * `true` would cause a server/client hydration mismatch. This is the canonical
+ * zustand-persist + SSR pattern (the effect-setState the lint rule warns about
+ * is correct here — synchronizing React with an external store's async load).
  */
 export function useHydratedStore(): boolean {
-  // Seed from the current hydration state so an already-hydrated store needs no
-  // state update (avoids a synchronous setState inside the effect).
-  const [hydrated, setHydrated] = useState(() => useStore.persist.hasHydrated());
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    if (hydrated) return;
-    // onFinishHydration fires when the async rehydrate completes. If hydration
-    // somehow finished between the initial render and here, defer the update to
-    // a microtask so it's not a synchronous setState inside the effect body.
+    // Already finished (the common case after the first mount).
     if (useStore.persist.hasHydrated()) {
-      queueMicrotask(() => setHydrated(true));
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setHydrated(true);
       return;
     }
+    // Otherwise wait for the async rehydrate to complete.
     return useStore.persist.onFinishHydration(() => setHydrated(true));
-  }, [hydrated]);
+  }, []);
 
   return hydrated;
 }
