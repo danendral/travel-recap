@@ -72,7 +72,11 @@ looking**.
   gradient stop using `AnimationFrame.routeProgress` (a pure, monotonic 0..1
   distance-fraction). NEVER rebuild trail geometry per frame — that re-flows the
   dashes and brings back the "different route in each playback phase" bug. The
-  monotonicity of `routeProgress` is guarded by a Vitest property test.
+  monotonicity of `routeProgress` is guarded by a Vitest property test. The
+  trail is a SOLID line (bright core + soft glow), revealed only up to the
+  vehicle — the not-yet-traveled route is intentionally NOT shown. Gradient
+  stops MUST stay strictly ascending or MapLibre rejects the whole gradient and
+  the line vanishes — see `revealGradient` in `applyFrame.ts`.
 - **The vehicle is a MapLibre `symbol` layer, NOT an HTML `Marker`.** HTML
   markers are CSS siblings of the canvas and are invisible to pixel readback —
   they would not appear in the exported video. Keep the vehicle (and trail) as

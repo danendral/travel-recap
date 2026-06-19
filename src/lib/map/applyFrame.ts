@@ -1,4 +1,8 @@
-import type { Map as MlMap, GeoJSONSource } from "maplibre-gl";
+import type {
+  Map as MlMap,
+  GeoJSONSource,
+  ExpressionSpecification,
+} from "maplibre-gl";
 import type { FeatureCollection, Point } from "geojson";
 import type { Id, LngLat, PathSegment, Trip, Waypoint } from "@/types";
 import type { AnimationFrame } from "@/lib/pathing/interpolate";
@@ -7,10 +11,44 @@ export const VEHICLE_SOURCE = "tr-vehicle";
 export const ROUTE_SOURCE = "tr-route";
 export const WAYPOINT_SOURCE = "tr-waypoints";
 
-// Trail palette. Traveled = bright cyan; the reveal gradient fades to fully
-// transparent past the vehicle so only the dim "upcoming" layer shows ahead.
-const TRAVELED_COLOR = "#7dd3fc";
-const TRAVELED_CLEAR = "rgba(125,211,252,0)";
+// The two revealed layers: a bright solid core + a soft glow underlay. Each is
+// drawn only up to the vehicle (the not-yet-traveled route is NOT shown), via a
+// per-frame line-gradient that's opaque to `routeProgress` then transparent.
+const ROUTE_LAYERS: { id: string; color: string; clear: string }[] = [
+  { id: "tr-route-glow", color: "rgba(56,189,248,0.45)", clear: "rgba(56,189,248,0)" },
+  { id: "tr-route-traveled", color: "#7dd3fc", clear: "rgba(125,211,252,0)" },
+];
+
+/**
+ * The reveal gradient for one layer: solid `color` up to `progress`, a short
+ * fade, then transparent. Stops are kept strictly ascending — MapLibre rejects
+ * the whole gradient otherwise (which would hide the trail entirely).
+ */
+function revealGradient(
+  color: string,
+  clear: string,
+  progress: number,
+  full: boolean,
+): ExpressionSpecification {
+  if (full) {
+    return ["interpolate", ["linear"], ["line-progress"], 0, color, 1, color];
+  }
+  const FADE = 0.012;
+  const p = Math.max(FADE, Math.min(1 - 2 * FADE, progress));
+  return [
+    "interpolate",
+    ["linear"],
+    ["line-progress"],
+    0,
+    color,
+    p,
+    color,
+    p + FADE,
+    clear,
+    1,
+    clear,
+  ];
+}
 
 /**
  * Sets the WHOLE-route polyline as the trail source's geometry. Called ONCE per
@@ -61,25 +99,16 @@ export function applyFrameToMap(
 
   vehicleSrc.setData(vehicleFeature(frame, segments, trip));
 
-  // Reveal the traveled portion by moving a single gradient stop — NO geometry
-  // change. Everything up to routeProgress is bright; past it is transparent
-  // (the dim full-length "upcoming" layer shows through). Clamp off the exact
-  // 0/1 ends so the interpolation stays well-formed.
-  if (map.getLayer("tr-route-traveled")) {
-    const p = Math.max(0.0001, Math.min(0.9999, frame.routeProgress));
-    map.setPaintProperty("tr-route-traveled", "line-gradient", [
-      "interpolate",
-      ["linear"],
-      ["line-progress"],
-      0,
-      TRAVELED_COLOR,
-      p,
-      TRAVELED_COLOR,
-      Math.min(1, p + 0.001),
-      TRAVELED_CLEAR,
-      1,
-      TRAVELED_CLEAR,
-    ]);
+  // Reveal each route layer up to the vehicle by moving its gradient — NO
+  // geometry change, so the line never re-flows. The not-yet-traveled route
+  // stays transparent; the final overview beat draws the whole route solid.
+  for (const layer of ROUTE_LAYERS) {
+    if (!map.getLayer(layer.id)) continue;
+    map.setPaintProperty(
+      layer.id,
+      "line-gradient",
+      revealGradient(layer.color, layer.clear, frame.routeProgress, frame.showFullRoute),
+    );
   }
 
   // Reveal labels only for stops that have been arrived at.

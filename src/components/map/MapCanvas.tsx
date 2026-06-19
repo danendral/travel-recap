@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import maplibregl, { Map as MlMap, GeoJSONSource } from "maplibre-gl";
+import maplibregl, {
+  Map as MlMap,
+  GeoJSONSource,
+  type ExpressionSpecification,
+} from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { Feature, FeatureCollection, Point } from "geojson";
 import { useStore } from "@/store";
@@ -76,12 +80,11 @@ function addAppLayers(map: MlMap) {
   void registerVehicleIcons(map);
 
   // The route trail is ONE stable polyline (the whole trip), set once per
-  // trip-shape change — never grown per frame. Progress is revealed by moving a
-  // `line-gradient` stop (see applyFrameToMap), so dashes never re-flow. This
-  // is the fix for the "different route in each playback phase" artifact.
-  //
-  // `lineMetrics: true` is REQUIRED for the `line-progress` expression the
-  // reveal gradient uses.
+  // trip-shape change — never grown per frame. The TRAVELED portion is revealed
+  // by moving a `line-gradient` stop (see applyFrameToMap); the not-yet-traveled
+  // route is intentionally NOT shown. A solid line (not dashed) stays crisp at
+  // every zoom. `lineMetrics: true` is REQUIRED for the `line-progress`
+  // expression the reveal gradient uses.
   if (!map.getSource(ROUTE_SOURCE)) {
     map.addSource(ROUTE_SOURCE, {
       type: "geojson",
@@ -89,56 +92,40 @@ function addAppLayers(map: MlMap) {
       data: emptyCollection(),
     });
   }
-  // 1) Soft glow underlay — a wide, blurred, dim solid line along the whole
-  //    route. Gives the trail a premium "lit" feel.
+  // Initial gradient (nothing revealed yet); applyFrameToMap updates it per frame.
+  const hiddenGradient: ExpressionSpecification = [
+    "interpolate",
+    ["linear"],
+    ["line-progress"],
+    0,
+    "rgba(0,0,0,0)",
+    1,
+    "rgba(0,0,0,0)",
+  ];
+  // 1) Soft glow underlay — wide, blurred; gradient-clipped to the traveled
+  //    portion so no glow leaks ahead of the vehicle. Gives a premium "lit" feel.
   map.addLayer({
     id: "tr-route-glow",
     type: "line",
     source: ROUTE_SOURCE,
     layout: { "line-cap": "round", "line-join": "round" },
     paint: {
-      "line-color": "#38bdf8",
-      "line-width": 9,
-      "line-opacity": 0.16,
-      "line-blur": 6,
+      "line-width": 11,
+      "line-blur": 8,
+      "line-gradient": hiddenGradient,
     },
   });
-  // 2) Upcoming track — dim dashed line over the FULL route, so viewers see
-  //    where the trip is heading. Constant; never animated.
-  map.addLayer({
-    id: "tr-route-upcoming",
-    type: "line",
-    source: ROUTE_SOURCE,
-    layout: { "line-cap": "butt", "line-join": "round" },
-    paint: {
-      "line-color": "#64748b",
-      "line-width": 2.5,
-      "line-opacity": 0.45,
-      "line-dasharray": [1.6, 1.8],
-    },
-  });
-  // 3) Traveled — bright dashed line on the SAME stable geometry, clipped to
-  //    the vehicle via a `line-gradient` alpha ramp (set per frame). Identical
-  //    dash array to the upcoming layer so the two read as one continuous
-  //    dashed route, just brighter behind the vehicle.
+  // 2) Traveled — bright SOLID line on the same stable geometry, revealed up to
+  //    the vehicle via the per-frame gradient. Round caps so the moving head
+  //    looks clean.
   map.addLayer({
     id: "tr-route-traveled",
     type: "line",
     source: ROUTE_SOURCE,
-    layout: { "line-cap": "butt", "line-join": "round" },
+    layout: { "line-cap": "round", "line-join": "round" },
     paint: {
       "line-width": 3.5,
-      "line-dasharray": [1.6, 1.8],
-      // Initial gradient (nothing revealed yet); applyFrameToMap updates it.
-      "line-gradient": [
-        "interpolate",
-        ["linear"],
-        ["line-progress"],
-        0,
-        "rgba(125,211,252,0)",
-        1,
-        "rgba(125,211,252,0)",
-      ],
+      "line-gradient": hiddenGradient,
     },
   });
 
