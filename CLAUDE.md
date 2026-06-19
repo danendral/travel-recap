@@ -65,6 +65,14 @@ looking**.
   threaded ffmpeg.wasm *fallback* does, and we'll proxy assets same-origin if/
   when we wire it up. Don't re-add these headers without same-origin-proxying
   every remote map asset first.
+- **The trail is ONE stable full-route polyline; progress is a `line-gradient`,
+  NOT growing geometry.** `buildRouteLine()` concatenates the whole route once;
+  `setRouteGeometry` sets the `tr-route` source (needs `lineMetrics: true`) only
+  when the trip *shape* changes. Per frame, `applyFrameToMap` moves a single
+  gradient stop using `AnimationFrame.routeProgress` (a pure, monotonic 0..1
+  distance-fraction). NEVER rebuild trail geometry per frame — that re-flows the
+  dashes and brings back the "different route in each playback phase" bug. The
+  monotonicity of `routeProgress` is guarded by a Vitest property test.
 - **The vehicle is a MapLibre `symbol` layer, NOT an HTML `Marker`.** HTML
   markers are CSS siblings of the canvas and are invisible to pixel readback —
   they would not appear in the exported video. Keep the vehicle (and trail) as
@@ -97,15 +105,24 @@ looking**.
       Mediabunny → MP4 download. **Riskiest piece — do next.** The vehicle is
       already a GL symbol layer (captures on readback) and `applyFrameToMap` is
       reusable by the export loop, so this should slot in cleanly.
-- [ ] Slice 3 — Pathing: turf great-circle flight arcs + OSRM drive snapping.
+- [x] Slice 3 (partial) — Pathing: turf great-circle flight arcs (done) + OSRM
+      car/walk routing with profiles, timeout, retry (done). Train/boat stay
+      smooth lines. **Seamless trail reworked**: one stable full-route polyline
+      revealed by a `line-gradient` (`buildRouteLine` + `routeProgress`) — see
+      `docs/superpowers/specs/2026-06-19-map-visual-fidelity-design.md`.
+- [x] Multi-trip + onboarding — dashboard at `/`, editor at `/trip/[id]`, trip
+      rename/delete/duplicate, first-run sample-trip seeding, backend-ready
+      thumbnails — see `docs/superpowers/specs/2026-06-19-multi-trip-onboarding-design.md`.
 - [ ] Slice 4 — EXIF photo drop → auto-plot route.
 - [ ] Slice 5 — Timeline polish + 9:16 / 1:1 aspect ratios.
 - [ ] Slice 6 — Monetize (watermark, caps, Stripe) + PWA + harden.
 
 Full plan: `C:\Users\ASUS\.claude\plans\toasty-soaring-torvalds.md`.
+Recent specs/plans: `docs/superpowers/specs/`, `docs/superpowers/plans/`.
 
 ## Commands
 
 - `npm run dev` — dev server (Turbopack) at http://localhost:3000
 - `npm run build` — production build (also runs typecheck + lint)
 - `npx tsc --noEmit` — fast type-check
+- `npm test` — Vitest (pure pathing / store / selector / thumbnail math)
