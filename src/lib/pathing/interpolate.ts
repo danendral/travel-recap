@@ -52,6 +52,14 @@ export interface AnimationFrame {
   showFullRoute: boolean;
 
   /**
+   * 0..1 fraction of the TOTAL route distance traveled so far — drives the
+   * trail reveal gradient. Monotonically non-decreasing across every phase
+   * (dwell → segment → dwell → … → overview), which is the seamlessness
+   * guarantee: the reveal can never jump back or skip at a phase boundary.
+   */
+  routeProgress: number;
+
+  /**
    * How many waypoints (from the start) have been ARRIVED at — their labels are
    * revealed. A stop counts as visited only once the vehicle reaches it, so the
    * destination of an in-progress leg stays hidden until arrival.
@@ -127,6 +135,59 @@ export function buildTimeline(
   return { phases, totalMs: cursor };
 }
 
+/**
+ * The whole trip as ONE continuous polyline: every segment's cached geometry
+ * concatenated, de-duping the shared vertex where one segment meets the next.
+ *
+ * Stable for a given trip shape — the trail layer's geometry is set from this
+ * ONCE (not per frame), so MapLibre never re-lays the dash pattern. That is the
+ * fix for the "different route in each playback phase" artifact: the old trail
+ * grew its geometry every frame, which re-flowed the dashes.
+ */
+export function buildRouteLine(
+  trip: Trip,
+  segments: Record<Id, PathSegment>,
+  waypoints: Record<Id, Waypoint>,
+): LngLat[] {
+  const coords: LngLat[] = [];
+  const push = (pts: LngLat[]) => {
+    for (const p of pts) {
+      const last = coords[coords.length - 1];
+      if (!last || last[0] !== p[0] || last[1] !== p[1]) coords.push(p);
+    }
+  };
+  for (const sid of trip.segmentIds) {
+    const seg = segments[sid];
+    const from = waypoints[seg?.fromWaypointId ?? ""];
+    const to = waypoints[seg?.toWaypointId ?? ""];
+    push(segmentPath(seg, from, to));
+  }
+  return coords.length >= 2 ? coords : [];
+}
+
+/**
+ * Planar length of each segment's drawn path + the total, used to map elapsed
+ * time onto a single `routeProgress` scalar (fraction of the WHOLE route
+ * distance covered). Lengths are computed from the same cached geometry the
+ * trail draws, so progress lines up with what's on screen.
+ */
+function routeLengths(
+  trip: Trip,
+  segments: Record<Id, PathSegment>,
+  waypoints: Record<Id, Waypoint>,
+): { perSegment: number[]; total: number } {
+  const perSegment = trip.segmentIds.map((sid) => {
+    const seg = segments[sid];
+    const pts = segmentPath(
+      seg,
+      waypoints[seg?.fromWaypointId ?? ""],
+      waypoints[seg?.toWaypointId ?? ""],
+    );
+    return cumulativeLengths(pts).total;
+  });
+  return { perSegment, total: perSegment.reduce((a, b) => a + b, 0) };
+}
+
 /** Geometry for a segment: cached arc/route, else a straight from→to line. */
 function segmentPath(
   seg: PathSegment | undefined,
@@ -192,9 +253,22 @@ export function sampleAnimation(
     arrivingIndex: 0,
     arriveProgress: 0,
     showFullRoute: false,
+    routeProgress: 0,
     visitedCount: 0,
   };
   if (timeline.phases.length === 0) return empty;
+
+  // Distance of each segment + the whole route, so elapsed time maps onto a
+  // single fraction-of-the-whole-route scalar that's continuous across phases.
+  const { perSegment, total: routeTotal } = routeLengths(
+    trip,
+    segments,
+    waypoints,
+  );
+  const lengthBefore = (segIndex: number) =>
+    perSegment.slice(0, Math.max(0, segIndex)).reduce((a, b) => a + b, 0);
+  const fractionFor = (dist: number) =>
+    routeTotal > 0 ? Math.max(0, Math.min(1, dist / routeTotal)) : 0;
 
   const clamped = Math.max(0, Math.min(tMs, timeline.totalMs));
   const phase =
@@ -237,6 +311,8 @@ export function sampleAnimation(
       arrivingIndex: phase.index,
       arriveProgress: Math.min(1, local * 2),
       showFullRoute: false,
+      // Parked at stop phase.index → the route up to that stop is fully drawn.
+      routeProgress: fractionFor(lengthBefore(phase.index)),
       // Arrived at this stop → stops 0..phase.index are visited.
       visitedCount: phase.index + 1,
     };
@@ -265,6 +341,7 @@ export function sampleAnimation(
       arrivingIndex: trip.waypointIds.length - 1,
       arriveProgress: 1,
       showFullRoute: true,
+      routeProgress: 1,
       visitedCount: trip.waypointIds.length,
     };
   }
@@ -309,6 +386,9 @@ export function sampleAnimation(
     arrivingIndex: phase.index + 1,
     arriveProgress: 0,
     showFullRoute: false,
+    routeProgress: fractionFor(
+      lengthBefore(phase.index) + (perSegment[phase.index] ?? 0) * eased,
+    ),
     // En route from stop phase.index → phase.index+1: the destination is NOT
     // yet visited, so only stops 0..phase.index are revealed.
     visitedCount: phase.index + 1,
