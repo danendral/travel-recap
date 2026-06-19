@@ -168,19 +168,24 @@ function addAppLayers(map: MlMap) {
     source: WAYPOINT_SOURCE,
     layout: {
       "text-field": ["get", "label"],
-      // Large + bold so the place name stands out above all other map text.
-      "text-size": 20,
-      "text-offset": [0, 1.3],
-      "text-anchor": "top",
+      "text-size": 15,
       "text-font": ["Open Sans Bold", "Noto Sans Bold", "Open Sans Regular"],
-      // Always show our place names, even over dense basemap labels.
-      "text-allow-overlap": true,
-      "text-ignore-placement": true,
+      // Let MapLibre's collision engine place + declutter labels: a crowded
+      // label flips to whichever side of its dot is clear (variable anchor)
+      // rather than stacking on top of a neighbour. `text-optional` lets a
+      // label drop entirely if no placement is collision-free, and NOT forcing
+      // overlap is what stops close stops (e.g. Jakarta/Bandung) smearing.
+      "text-variable-anchor": ["top", "bottom", "left", "right"],
+      "text-radial-offset": 0.9,
+      "text-justify": "auto",
+      "text-allow-overlap": false,
+      "text-ignore-placement": false,
+      "text-optional": true,
     },
     paint: {
       "text-color": "#ffffff",
       "text-halo-color": "#0b1120",
-      "text-halo-width": 2.4,
+      "text-halo-width": 2.2,
       "text-halo-blur": 0.4,
     },
   });
