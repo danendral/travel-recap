@@ -68,7 +68,10 @@ async function photon(
       .filter((v) => v && v !== p.name)
       .join(", ");
     return {
-      id: p.osm_id ? `photon-${p.osm_id}` : `photon-${i}`,
+      // Include the index: Photon can return multiple features sharing one
+      // osm_id (same place as both an OSM node and way), which would collide as
+      // React keys. The index guarantees uniqueness within a result set.
+      id: `photon-${p.osm_id ?? "x"}-${i}`,
       label: p.name ?? p.city ?? p.country ?? q,
       context,
       position: [f.geometry.coordinates[0], f.geometry.coordinates[1]],
@@ -98,10 +101,10 @@ async function nominatim(
     name?: string;
   }>;
 
-  return data.map((r) => {
+  return data.map((r, i) => {
     const [label, ...rest] = r.display_name.split(", ");
     return {
-      id: `nominatim-${r.place_id}`,
+      id: `nominatim-${r.place_id}-${i}`,
       label: r.name || label,
       context: rest.join(", "),
       position: [parseFloat(r.lon), parseFloat(r.lat)],
