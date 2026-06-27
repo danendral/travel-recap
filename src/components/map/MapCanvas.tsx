@@ -393,12 +393,30 @@ export default function MapCanvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [styleId]);
 
+  // When the aspect ratio changes, the container reshapes (CSS) — tell MapLibre
+  // to resync its drawing buffer + transform so the preview viewport matches the
+  // chosen output shape (and thus the export).
+  const aspectRatio = trip?.aspectRatio;
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const id = requestAnimationFrame(() => map.resize());
+    return () => cancelAnimationFrame(id);
+  }, [aspectRatio]);
+
+  const aspect = trip?.aspectRatio === "9:16" ? "9 / 16"
+    : trip?.aspectRatio === "1:1" ? "1 / 1"
+    : "16 / 9";
+
   return (
-    <div
-      ref={containerRef}
-      className="absolute inset-0 h-full w-full"
-      data-testid="map-canvas"
-    />
+    <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
+      <div
+        ref={containerRef}
+        className="max-h-full max-w-full shadow-2xl ring-1 ring-slate-700"
+        style={{ aspectRatio: aspect, height: "100%", width: "auto" }}
+        data-testid="map-canvas"
+      />
+    </div>
   );
 }
 
