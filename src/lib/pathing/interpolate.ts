@@ -381,8 +381,12 @@ export function sampleAnimation(
   const fromZoom = from?.cameraHint?.zoom ?? STOP_ZOOM;
   const toZoom = to?.cameraHint?.zoom ?? STOP_ZOOM;
   const pullback = from && to ? pullbackFor(from.position, to.position) : 0;
+  const aspect = aspectRatioToNumber(trip.aspectRatio ?? "16:9");
+  // Narrow (portrait) frames need more pullback to keep a wide leg in view.
+  const aspectExtra = aspect < 1 ? (1 / aspect - 1) * 0.5 : 0;
   const zoom =
-    fromZoom + (toZoom - fromZoom) * eased - Math.sin(raw * Math.PI) * pullback;
+    fromZoom + (toZoom - fromZoom) * eased
+    - Math.sin(raw * Math.PI) * (pullback + aspectExtra);
 
   // Tilt rises then falls across the leg; 0 at both ends so it joins the
   // (pitch 0) dwells with no jump. Moderate so fast legs aren't disorienting.

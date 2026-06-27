@@ -171,3 +171,22 @@ describe("sampleAnimation overview beat is aspect-aware", () => {
     expect(fT.zoom).toBeLessThan(fW.zoom);
   });
 });
+
+describe("mid-leg follow zoom respects aspect ratio", () => {
+  it("never exceeds STOP_ZOOM and pulls back at least as much in 9:16 as 16:9", () => {
+    const wide = makeTripFixture("16:9");
+    const tall = makeTripFixture("9:16");
+    const tlW = buildTimeline(wide.trip, wide.segments);
+    const tlT = buildTimeline(tall.trip, tall.segments);
+    const midW = tlW.phases.find((p) => p.kind === "segment")!;
+    const midT = tlT.phases.find((p) => p.kind === "segment")!;
+    const tW = (midW.startMs + midW.endMs) / 2;
+    const tT = (midT.startMs + midT.endMs) / 2;
+    const fW = sampleAnimation(tW, wide.trip, wide.waypoints, wide.segments, tlW);
+    const fT = sampleAnimation(tT, tall.trip, tall.waypoints, tall.segments, tlT);
+    expect(fW.zoom).toBeLessThanOrEqual(7);
+    expect(fT.zoom).toBeLessThanOrEqual(7);
+    // Narrow frame pulls back at least as far (zoom no higher) than wide.
+    expect(fT.zoom).toBeLessThanOrEqual(fW.zoom + 1e-9);
+  });
+});
