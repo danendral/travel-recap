@@ -4,18 +4,19 @@ import { useRef, useState } from "react";
 import type { Map as MlMap } from "maplibre-gl";
 import { useStore } from "@/store";
 import { useTripData } from "@/store/selectors";
-import { MAP_STYLES } from "@/lib/constants";
+import { MAP_STYLES, RESOLUTION_BY_RATIO } from "@/lib/constants";
+import type { AspectRatio } from "@/types";
 import {
   exportVideo,
   downloadBlob,
   type ExportResult,
 } from "@/lib/export/exportVideo";
 
-type Format = { id: string; label: string; sub: string; width: number; height: number };
+type Format = { id: string; label: string; sub: string };
 
 const FORMATS: Format[] = [
-  { id: "16:9", label: "16:9", sub: "Normal / YouTube", width: 1280, height: 720 },
-  { id: "9:16", label: "9:16", sub: "Reels / TikTok", width: 720, height: 1280 },
+  { id: "16:9", label: "16:9", sub: "Normal / YouTube" },
+  { id: "9:16", label: "9:16", sub: "Reels / TikTok" },
 ];
 
 const SPEEDS = [
@@ -40,15 +41,20 @@ export default function ExportPanel() {
   const seek = useStore((s) => s.seek);
   const rate = useStore((s) => s.playback.playbackRate);
 
+  const setAspectRatio = useStore((s) => s.setAspectRatio);
+
   const [open, setOpen] = useState(false);
-  const [formatId, setFormatId] = useState("16:9");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   if (!trip) return null;
-  const format = FORMATS.find((f) => f.id === formatId)!;
+  const ratio = trip.aspectRatio;
+  const format = {
+    id: ratio,
+    ...RESOLUTION_BY_RATIO[ratio],
+  };
 
   const previewPlay = () => {
     seek(0);
@@ -137,8 +143,8 @@ export default function ExportPanel() {
                     {FORMATS.map((f) => (
                       <button
                         key={f.id}
-                        onClick={() => setFormatId(f.id)}
-                        className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition ${formatId === f.id ? "bg-sky-500/20 ring-1 ring-sky-400" : "bg-slate-800/60 hover:bg-slate-800"}`}
+                        onClick={() => setAspectRatio(f.id as AspectRatio)}
+                        className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition ${ratio === f.id ? "bg-sky-500/20 ring-1 ring-sky-400" : "bg-slate-800/60 hover:bg-slate-800"}`}
                       >
                         <span className="shrink-0 rounded border border-slate-500 bg-slate-700" style={{ width: f.id === "9:16" ? 11 : 18, height: f.id === "9:16" ? 18 : 11 }} />
                         <span className="min-w-0">
@@ -209,7 +215,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
  * Dims the area outside the chosen aspect ratio and outlines the capture region,
  * so the user sees exactly what the exported video will frame.
  */
-function RatioFrame({ format }: { format: Format }) {
+function RatioFrame({ format }: { format: { id: string; width: number; height: number } }) {
   const portrait = format.height > format.width;
   return (
     <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
