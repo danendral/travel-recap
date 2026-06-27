@@ -2,10 +2,11 @@ import { describe, it, expect } from "vitest";
 import {
   buildRouteLine,
   buildTimeline,
+  fitBounds,
   sampleAnimation,
   sliceAlongPolyline,
 } from "./interpolate";
-import type { Id, PathSegment, Trip, Waypoint } from "@/types";
+import type { Id, LngLat, PathSegment, Trip, Waypoint } from "@/types";
 
 /** Jakarta→Bandung→Jakarta-shaped round trip (the reported bug case). */
 function fixture() {
@@ -81,5 +82,29 @@ describe("routeProgress", () => {
     expect(
       sampleAnimation(timeline.totalMs, trip, waypoints, segments, timeline).routeProgress,
     ).toBeCloseTo(1, 6);
+  });
+});
+
+const TOKYO: LngLat = [139.69, 35.69];
+const LA: LngLat = [-118.24, 34.05];
+const NY: LngLat = [-74.0, 40.71];
+const ROUTE = [TOKYO, LA, NY];
+
+describe("fitBounds (baseline, pre-aspect-ratio)", () => {
+  it("returns a zoom within the documented clamp", () => {
+    const { zoom } = fitBounds(ROUTE);
+    expect(zoom).toBeGreaterThanOrEqual(0.8);
+    expect(zoom).toBeLessThanOrEqual(7);
+  });
+
+  it("returns a finite center", () => {
+    const { center } = fitBounds(ROUTE);
+    expect(Number.isFinite(center[0])).toBe(true);
+    expect(Number.isFinite(center[1])).toBe(true);
+  });
+
+  it("handles a single point without throwing", () => {
+    const { zoom } = fitBounds([TOKYO]);
+    expect(Number.isFinite(zoom)).toBe(true);
   });
 });
