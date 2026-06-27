@@ -5,6 +5,7 @@ import {
   fitBounds,
   sampleAnimation,
   sliceAlongPolyline,
+  aspectRatioToNumber,
 } from "./interpolate";
 import type { Id, LngLat, PathSegment, Trip, Waypoint } from "@/types";
 
@@ -106,5 +107,35 @@ describe("fitBounds (baseline, pre-aspect-ratio)", () => {
   it("handles a single point without throwing", () => {
     const { zoom } = fitBounds([TOKYO]);
     expect(Number.isFinite(zoom)).toBe(true);
+  });
+});
+
+describe("fitBounds (aspect-ratio aware)", () => {
+  it("maps aspect ratios to numbers", () => {
+    expect(aspectRatioToNumber("16:9")).toBeCloseTo(16 / 9);
+    expect(aspectRatioToNumber("9:16")).toBeCloseTo(9 / 16);
+    expect(aspectRatioToNumber("1:1")).toBe(1);
+  });
+
+  it("zooms out MORE for a tall 9:16 frame than a wide 16:9 frame on a wide route", () => {
+    const wide = fitBounds(ROUTE, { aspectRatio: 16 / 9 });
+    const tall = fitBounds(ROUTE, { aspectRatio: 9 / 16 });
+    // A horizontally-wide route must pull back further in a narrow viewport.
+    expect(tall.zoom).toBeLessThan(wide.zoom);
+  });
+
+  it("biases the frame downward so labels below the bottom dot stay on-screen", () => {
+    const noBias = fitBounds(ROUTE, { aspectRatio: 9 / 16, labelBiasLat: 0 });
+    const biased = fitBounds(ROUTE, { aspectRatio: 9 / 16 });
+    // Downward bias lowers the center latitude (frame shifts down to include labels).
+    expect(biased.center[1]).toBeLessThan(noBias.center[1]);
+  });
+
+  it("keeps zoom within the documented clamp for all ratios", () => {
+    for (const ar of [16 / 9, 9 / 16, 1]) {
+      const { zoom } = fitBounds(ROUTE, { aspectRatio: ar });
+      expect(zoom).toBeGreaterThanOrEqual(0.8);
+      expect(zoom).toBeLessThanOrEqual(7);
+    }
   });
 });

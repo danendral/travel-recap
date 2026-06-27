@@ -1,7 +1,7 @@
 import { bearing as turfBearing } from "@turf/bearing";
 import { distance as turfDistance } from "@turf/distance";
 import { point } from "@turf/helpers";
-import type { LngLat, PathSegment, Trip, Waypoint, Id } from "@/types";
+import type { LngLat, PathSegment, Trip, Waypoint, Id, AspectRatio } from "@/types";
 import { DEFAULT_DWELL_MS } from "@/lib/constants";
 
 /**
@@ -85,6 +85,18 @@ const STOP_ZOOM = 7;
 
 /** Final beat: hold, then pull out to frame the whole route. */
 const OVERVIEW_MS = 2600;
+
+/** Generous, label-safe overview margin (fraction of the route span added around it). */
+export const OVERVIEW_PADDING = 0.45;
+/** Extra latitude span added BELOW the route so labels (which hang under their dot) fit. */
+export const OVERVIEW_LABEL_BIAS_LAT = 0.18;
+
+/** Maps an aspect-ratio union to a numeric width/height. */
+export function aspectRatioToNumber(ratio: AspectRatio): number {
+  if (ratio === "9:16") return 9 / 16;
+  if (ratio === "1:1") return 1;
+  return 16 / 9;
+}
 
 /**
  * Builds the dwell/segment phase timeline for a trip:
@@ -397,15 +409,29 @@ export function sampleAnimation(
 
 /**
  * Computes a center + zoom that frames all the given points (the whole route)
- * with padding. Approximates MapLibre's fitBounds using the longitude/latitude
- * span at the equator; good enough for the final overview beat.
+ * for a viewport of the given aspect ratio, with generous label-safe padding.
+ *
+ * Aspect-aware: a span is converted to the zoom that makes it exactly fill its
+ * viewport dimension, and the MORE CONSTRAINING (smaller) zoom wins. So a
+ * horizontally-wide route in a tall 9:16 frame pulls back further than in a wide
+ * 16:9 frame — the fix for "fits the preview but clips in the portrait export".
+ *
+ * Mercator note: latitude degrees don't map linearly to screen height. We
+ * approximate the vertical extent at the route's center latitude (the existing
+ * code already approximated framing); good enough for an overview beat.
  */
-export function fitBounds(points: LngLat[]): { center: LngLat; zoom: number } {
+export function fitBounds(
+  points: LngLat[],
+  opts: { aspectRatio?: number; padding?: number; labelBiasLat?: number } = {},
+): { center: LngLat; zoom: number } {
   if (points.length === 0) return { center: [0, 0], zoom: 1.5 };
 
-  // Unwrap longitudes so a route crossing the antimeridian (e.g. Tokyo→LA)
-  // measures the SHORT span across the Pacific, not the long way round. Then
-  // normalize the center longitude back into [-180, 180].
+  const aspect = opts.aspectRatio ?? 16 / 9;
+  const padding = opts.padding ?? OVERVIEW_PADDING;
+  const labelBias = opts.labelBiasLat ?? OVERVIEW_LABEL_BIAS_LAT;
+
+  // Unwrap longitudes so an antimeridian-crossing route (Tokyo→LA) measures the
+  // SHORT span across the Pacific, then normalize the center longitude back.
   const unwrapped: number[] = [points[0][0]];
   let offset = 0;
   for (let i = 1; i < points.length; i++) {
@@ -423,16 +449,32 @@ export function fitBounds(points: LngLat[]): { center: LngLat; zoom: number } {
     maxLat = Math.max(maxLat, points[i][1]);
   }
 
+  let lngSpan = Math.max(maxLng - minLng, 0.01);
+  let latSpan = Math.max(maxLat - minLat, 0.01);
+
+  // Label bias: extend the latitude span downward (and shift center down) so the
+  // label hanging beneath the bottom-most waypoint is inside the frame.
+  const biasDeg = Math.max(latSpan * labelBias, 0.5);
+  const centerLatRaw = (minLat + maxLat) / 2 - biasDeg / 2;
+  latSpan += biasDeg;
+
+  // Generous padding on both spans.
+  lngSpan *= 1 + padding * 2;
+  latSpan *= 1 + padding * 2;
+
   let centerLng = (minLng + maxLng) / 2;
   centerLng = ((centerLng + 180) % 360 + 360) % 360 - 180; // wrap to [-180,180]
-  const center: LngLat = [centerLng, (minLat + maxLat) / 2];
+  const center: LngLat = [centerLng, centerLatRaw];
 
-  const lngSpan = Math.max(maxLng - minLng, 0.01);
-  const latSpan = Math.max(maxLat - minLat, 0.01);
-  // World is 360° at zoom 0; halve the visible span per zoom level. Use the
-  // larger span (×1.5 for padding) to ensure everything fits with margin.
-  const span = Math.max(lngSpan, latSpan * 1.6) * 1.5;
-  const zoom = Math.max(0.8, Math.min(STOP_ZOOM, Math.log2(360 / span)));
+  // Convert each span to the zoom that fits it in its own viewport dimension.
+  // World width is 360° at zoom 0 and halves per zoom level. A wide 16:9 frame
+  // has proportionally MORE horizontal room than a tall 9:16 frame — captured by
+  // multiplying the world width by `aspect` for the horizontal fit, and dividing
+  // the lat span by `aspect` for the vertical fit.
+  const zoomForWidth = Math.log2(360 * aspect / lngSpan);
+  const zoomForHeight = Math.log2(360 / (latSpan / aspect));
+  const zoom = Math.max(0.8, Math.min(STOP_ZOOM, Math.min(zoomForWidth, zoomForHeight)));
+
   return { center, zoom };
 }
 
