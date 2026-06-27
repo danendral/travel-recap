@@ -184,9 +184,10 @@ describe("mid-leg follow zoom respects aspect ratio", () => {
     const tT = (midT.startMs + midT.endMs) / 2;
     const fW = sampleAnimation(tW, wide.trip, wide.waypoints, wide.segments, tlW);
     const fT = sampleAnimation(tT, tall.trip, tall.waypoints, tall.segments, tlT);
-    expect(fW.zoom).toBeLessThanOrEqual(7);
-    expect(fT.zoom).toBeLessThanOrEqual(7);
-    // Narrow frame pulls back at least as far (zoom no higher) than wide.
-    expect(fT.zoom).toBeLessThanOrEqual(fW.zoom + 1e-9);
+    expect(fW.zoom).toBeLessThanOrEqual(7); // STOP_ZOOM
+    expect(fT.zoom).toBeLessThanOrEqual(7); // STOP_ZOOM
+    // Narrow frame pulls back STRICTLY further — aspectExtra ≈ 0.389 for this
+    // fixture; margin of 0.3 is comfortably inside the gap but not flaky.
+    expect(fT.zoom).toBeLessThan(fW.zoom - 0.3);
   });
 });
