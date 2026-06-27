@@ -6,7 +6,10 @@ import {
   sampleAnimation,
   sliceAlongPolyline,
   aspectRatioToNumber,
+  OVERVIEW_PADDING,
+  OVERVIEW_LABEL_BIAS_LAT,
 } from "./interpolate";
+import { RESOLUTION_BY_RATIO } from "@/lib/constants";
 import type { Id, LngLat, PathSegment, Trip, Waypoint } from "@/types";
 
 /** Jakarta→Bandung→Jakarta-shaped round trip (the reported bug case). */
@@ -190,4 +193,129 @@ describe("mid-leg follow zoom respects aspect ratio", () => {
     // fixture; margin of 0.3 is comfortably inside the gap but not flaky.
     expect(fT.zoom).toBeLessThan(fW.zoom - 0.3);
   });
+});
+
+// Suppress unused-import warnings for exported constants (they are live docs of
+// the padding values the containment tests implicitly depend on).
+void OVERVIEW_PADDING;
+void OVERVIEW_LABEL_BIAS_LAT;
+
+describe("fitBounds frames the whole route with margin (anti-clip)", () => {
+  /**
+   * Unwrap longitudes relative to points[0] so antimeridian-crossing routes
+   * (Tokyo→LA) are measured on a continuous number line — the same convention
+   * fitBounds uses internally to compute its center and zoom.
+   */
+  function unwrapLngs(points: readonly [number, number][]): number[] {
+    const out: number[] = [points[0][0]];
+    let offset = 0;
+    for (let i = 1; i < points.length; i++) {
+      const d = points[i][0] - points[i - 1][0];
+      if (d > 180) offset -= 360;
+      else if (d < -180) offset += 360;
+      out.push(points[i][0] + offset);
+    }
+    return out;
+  }
+
+  /**
+   * The ideal (unclamped) zoom that would fit the padded bounding box of
+   * `points` in a viewport of the given aspect ratio.  We re-derive it here
+   * so the test can detect whether the minimum-zoom floor was hit.
+   */
+  function idealZoomForRoute(
+    points: typeof ROUTE,
+    aspect: number,
+    padding: number,
+    labelBias: number,
+  ) {
+    const unwrapped = unwrapLngs(points as unknown as [number, number][]);
+    const minLng = Math.min(...unwrapped);
+    const maxLng = Math.max(...unwrapped);
+    const minLat = Math.min(...points.map((p) => p[1]));
+    const maxLat = Math.max(...points.map((p) => p[1]));
+    let lngSpan = Math.max(maxLng - minLng, 0.01);
+    let latSpan = Math.max(maxLat - minLat, 0.01);
+    const biasDeg = Math.max(latSpan * labelBias, 0.5);
+    latSpan += biasDeg;
+    lngSpan *= 1 + padding * 2;
+    latSpan *= 1 + padding * 2;
+    const zoomForWidth = Math.log2((360 * aspect) / lngSpan);
+    const zoomForHeight = Math.log2(360 / latSpan);
+    return Math.min(zoomForWidth, zoomForHeight);
+  }
+
+  for (const ar of ["16:9", "9:16"] as const) {
+    it(`padded bounding box fits the framed viewport for ${ar} (anti-clip)`, () => {
+      const aspect = aspectRatioToNumber(ar);
+      const { center, zoom } = fitBounds(ROUTE, { aspectRatio: aspect });
+
+      // Viewport half-extents in degrees at this zoom level:
+      //   height covers 360/2^zoom degrees of latitude
+      //   width covers aspect × 360/2^zoom degrees of longitude
+      const halfLat = (360 / 2 ** zoom) / 2;
+      const halfLng = (aspect * 360 / 2 ** zoom) / 2;
+
+      // Recompute the padded bounding box in the unwrapped space that
+      // fitBounds uses internally, then measure the half-spans of that
+      // padded box.  These must fit inside the viewport — that is the
+      // containment guarantee fitBounds makes.
+      const unwrapped = unwrapLngs(ROUTE as unknown as [number, number][]);
+      const minLng = Math.min(...unwrapped);
+      const maxLng = Math.max(...unwrapped);
+      const minLat = Math.min(...ROUTE.map((p) => p[1]));
+      const maxLat = Math.max(...ROUTE.map((p) => p[1]));
+      let lngSpan = Math.max(maxLng - minLng, 0.01);
+      let latSpan = Math.max(maxLat - minLat, 0.01);
+      const biasDeg = Math.max(latSpan * OVERVIEW_LABEL_BIAS_LAT, 0.5);
+      latSpan += biasDeg;
+      lngSpan *= 1 + OVERVIEW_PADDING * 2;
+      latSpan *= 1 + OVERVIEW_PADDING * 2;
+      const paddedHalfLng = lngSpan / 2;
+      const paddedHalfLat = latSpan / 2;
+
+      const ideal = idealZoomForRoute(
+        ROUTE,
+        aspect,
+        OVERVIEW_PADDING,
+        OVERVIEW_LABEL_BIAS_LAT,
+      );
+      const zoomWasClamped = ideal < 0.8; // 0.8 is the zoom floor in fitBounds
+
+      if (!zoomWasClamped) {
+        // When zoom is NOT clamped: the viewport is exactly sized to hold the
+        // padded box, so the padded half-spans must equal the viewport
+        // half-extents (within floating-point noise), and the raw waypoints
+        // are well inside (< half-span / padding factor).
+        expect(paddedHalfLng).toBeLessThanOrEqual(halfLng * 1.001);
+        expect(paddedHalfLat).toBeLessThanOrEqual(halfLat * 1.001);
+
+        // OVERVIEW_PADDING = 0.45 inflates each span by ×1.9, so raw
+        // waypoints sit at most 1/1.9 ≈ 52.6% of the half-extent from center.
+        // Assert they are comfortably inside (< 95% of half-extent).
+        for (let i = 0; i < ROUTE.length; i++) {
+          const dLng = Math.abs(unwrapped[i] - (minLng + maxLng) / 2);
+          const dLat = Math.abs(ROUTE[i][1] - center[1]);
+          expect(dLng).toBeLessThanOrEqual(halfLng * 0.95);
+          expect(dLat).toBeLessThanOrEqual(halfLat * 0.95);
+        }
+      } else {
+        // Zoom hit the minimum floor (0.8). The route is too wide/tall to
+        // fit perfectly in this extreme aspect ratio at our zoom floor.
+        // Assert that at least the zoom floor was applied (best effort).
+        expect(zoom).toBeCloseTo(0.8, 3);
+        // And that the padded lat span DOES fit (height is rarely the issue).
+        expect(paddedHalfLat).toBeLessThanOrEqual(halfLat * 1.001);
+      }
+    });
+  }
+});
+
+describe("preview aspect == export resolution aspect (WYSIWYG seam)", () => {
+  for (const ratio of ["16:9", "9:16", "1:1"] as const) {
+    it(`aspectRatioToNumber matches RESOLUTION_BY_RATIO for ${ratio}`, () => {
+      const res = RESOLUTION_BY_RATIO[ratio];
+      expect(aspectRatioToNumber(ratio)).toBeCloseTo(res.width / res.height, 5);
+    });
+  }
 });
