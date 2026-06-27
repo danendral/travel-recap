@@ -95,7 +95,11 @@ export default function ExportPanel() {
     } finally {
       container.style.width = prev.w;
       container.style.height = prev.h;
-      map.resize();
+      // Re-assert the CSS letterbox box (export overrode width/height with exact
+      // pixels). A double rAF lets the layout settle before MapLibre re-measures.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => map.resize()),
+      );
       abortRef.current = null;
       setBusy(false);
     }
@@ -107,9 +111,6 @@ export default function ExportPanel() {
 
   return (
     <>
-      {/* Crop-frame overlay showing the chosen aspect ratio over the map. */}
-      {open && !busy && <RatioFrame format={format} />}
-
       <div className="absolute right-3 top-3 z-20">
         {!open ? (
           <button
@@ -207,28 +208,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div>
       <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-500">{label}</p>
       {children}
-    </div>
-  );
-}
-
-/**
- * Dims the area outside the chosen aspect ratio and outlines the capture region,
- * so the user sees exactly what the exported video will frame.
- */
-function RatioFrame({ format }: { format: { id: string; width: number; height: number } }) {
-  const portrait = format.height > format.width;
-  return (
-    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-      <div
-        className="ring-2 ring-sky-400/80 shadow-[0_0_0_9999px_rgba(2,6,23,0.55)]"
-        style={{
-          aspectRatio: `${format.width} / ${format.height}`,
-          height: portrait ? "90%" : "auto",
-          width: portrait ? "auto" : "82%",
-          maxWidth: "92%",
-          maxHeight: "90%",
-        }}
-      />
     </div>
   );
 }
