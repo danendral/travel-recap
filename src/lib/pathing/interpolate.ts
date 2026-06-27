@@ -335,7 +335,8 @@ export function sampleAnimation(
     const span = phase.endMs - phase.startMs || 1;
     const local = (clamped - phase.startMs) / span;
     const all = trip.waypointIds.map((id) => waypoints[id]?.position).filter(Boolean) as LngLat[];
-    const fit = fitBounds(all);
+    const tripAspect = (trip as { aspectRatio?: import("@/types").AspectRatio }).aspectRatio ?? "16:9";
+    const fit = fitBounds(all, { aspectRatio: aspectRatioToNumber(tripAspect) });
     const last = wpAt(trip.waypointIds.length - 1)?.position ?? fit.center;
 
     // Hold briefly on the last stop, then ease out to the overview.

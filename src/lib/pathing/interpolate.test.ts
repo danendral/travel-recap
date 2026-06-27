@@ -139,3 +139,35 @@ describe("fitBounds (aspect-ratio aware)", () => {
     }
   });
 });
+
+function makeTripFixture(aspectRatio: "16:9" | "9:16") {
+  const ids: Id[] = ["w0", "w1", "w2"];
+  const segIds: Id[] = ["s0", "s1"];
+  const waypoints: Record<Id, Waypoint> = {
+    w0: { id: "w0", label: "Tokyo", position: TOKYO },
+    w1: { id: "w1", label: "LA", position: LA },
+    w2: { id: "w2", label: "New York", position: NY },
+  };
+  const segments: Record<Id, PathSegment> = {
+    s0: { id: "s0", fromWaypointId: "w0", toWaypointId: "w1", vehicleType: "plane", mode: "flight", routeStatus: "resolved", durationMs: 3000, geometry: [TOKYO, LA] },
+    s1: { id: "s1", fromWaypointId: "w1", toWaypointId: "w2", vehicleType: "plane", mode: "flight", routeStatus: "resolved", durationMs: 3000, geometry: [LA, NY] },
+  };
+  const trip = {
+    id: "t0", name: "t", waypointIds: ids, segmentIds: segIds,
+    mapStyleId: "dark", aspectRatio, createdAt: "", updatedAt: "",
+  } as unknown as Trip;
+  return { trip, waypoints, segments };
+}
+
+describe("sampleAnimation overview beat is aspect-aware", () => {
+  it("overview zoom is lower for 9:16 than 16:9 on a wide route", () => {
+    const wide = makeTripFixture("16:9");
+    const tall = makeTripFixture("9:16");
+    const tlW = buildTimeline(wide.trip, wide.segments);
+    const tlT = buildTimeline(tall.trip, tall.segments);
+    const fW = sampleAnimation(tlW.totalMs, wide.trip, wide.waypoints, wide.segments, tlW);
+    const fT = sampleAnimation(tlT.totalMs, tall.trip, tall.waypoints, tall.segments, tlT);
+    expect(fT.showFullRoute).toBe(true);
+    expect(fT.zoom).toBeLessThan(fW.zoom);
+  });
+});
