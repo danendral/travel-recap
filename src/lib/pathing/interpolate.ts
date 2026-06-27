@@ -466,13 +466,12 @@ export function fitBounds(
   centerLng = ((centerLng + 180) % 360 + 360) % 360 - 180; // wrap to [-180,180]
   const center: LngLat = [centerLng, centerLatRaw];
 
-  // Convert each span to the zoom that fits it in its own viewport dimension.
-  // World width is 360° at zoom 0 and halves per zoom level. A wide 16:9 frame
-  // has proportionally MORE horizontal room than a tall 9:16 frame — captured by
-  // multiplying the world width by `aspect` for the horizontal fit, and dividing
-  // the lat span by `aspect` for the vertical fit.
-  const zoomForWidth = Math.log2(360 * aspect / lngSpan);
-  const zoomForHeight = Math.log2(360 / (latSpan / aspect));
+  // Mercator world is square; normalize viewport height to a unit reference so
+  // viewport width is proportional to `aspect`. Only the width-fit zoom carries
+  // the aspect factor (a wider frame fits more longitude at the same zoom); the
+  // height-fit is aspect-independent. The smaller (more constraining) zoom wins.
+  const zoomForWidth = Math.log2((360 * aspect) / lngSpan);
+  const zoomForHeight = Math.log2(360 / latSpan);
   const zoom = Math.max(0.8, Math.min(STOP_ZOOM, Math.min(zoomForWidth, zoomForHeight)));
 
   return { center, zoom };
