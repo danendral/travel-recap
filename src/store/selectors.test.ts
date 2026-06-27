@@ -12,7 +12,7 @@ function state(): SummariesState {
   };
   const mk = (id: string, name: string, wps: Id[], updatedAt: string): Trip => ({
     id, name, waypointIds: wps, segmentIds: [], mapStyleId: "dark",
-    createdAt: "2026-01-01T00:00:00Z", updatedAt,
+    aspectRatio: "16:9", createdAt: "2026-01-01T00:00:00Z", updatedAt,
   });
   const trips: Record<Id, Trip> = {
     t1: mk("t1", "Old", ["a", "b"], "2026-06-01T00:00:00Z"),

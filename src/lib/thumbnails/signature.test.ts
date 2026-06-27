@@ -12,7 +12,7 @@ function setup(positions: [number, number][], styleId = "dark") {
   });
   const trip: Trip = {
     id: "t", name: "T", waypointIds, segmentIds: [], mapStyleId: styleId,
-    createdAt: "", updatedAt: "",
+    aspectRatio: "16:9", createdAt: "", updatedAt: "",
   };
   return { trip, waypoints };
 }

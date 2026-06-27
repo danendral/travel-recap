@@ -30,7 +30,7 @@ function fixture() {
   };
   const trip: Trip = {
     id: "t", name: "T", waypointIds: ["a", "b", "c"], segmentIds: ["s1", "s2"],
-    mapStyleId: "dark", createdAt: "", updatedAt: "",
+    mapStyleId: "dark", aspectRatio: "16:9", createdAt: "", updatedAt: "",
   };
   return { trip, segments, waypoints };
 }
@@ -55,7 +55,7 @@ describe("buildRouteLine", () => {
   });
   it("returns [] for a trip with fewer than 2 points", () => {
     const line = buildRouteLine(
-      { id: "t", name: "T", waypointIds: ["a"], segmentIds: [], mapStyleId: "dark", createdAt: "", updatedAt: "" },
+      { id: "t", name: "T", waypointIds: ["a"], segmentIds: [], mapStyleId: "dark", aspectRatio: "16:9", createdAt: "", updatedAt: "" },
       {},
       { a: { id: "a", position: [0, 0], label: "A" } },
     );

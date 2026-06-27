@@ -65,6 +65,8 @@ export interface Trip {
   segmentIds: Id[];
   /** Identifier of the chosen map style (resolved to a spec at render time). */
   mapStyleId: string;
+  /** Output aspect ratio; drives preview letterbox + export framing. */
+  aspectRatio: AspectRatio;
   createdAt: string;
   updatedAt: string;
 }

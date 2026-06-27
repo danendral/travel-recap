@@ -62,6 +62,7 @@ interface TravelRecapStore {
 
   // --- Appearance ---
   setMapStyle(styleId: string): void;
+  setAspectRatio(ratio: import("@/types").AspectRatio): void;
 
   // --- Playback ---
   play(): void;
@@ -192,6 +193,7 @@ export const useStore = create<TravelRecapStore>()(
             waypointIds: [],
             segmentIds: [],
             mapStyleId: DEFAULT_STYLE_ID,
+            aspectRatio: "16:9",
             createdAt: now(),
             updatedAt: now(),
           };
@@ -206,6 +208,7 @@ export const useStore = create<TravelRecapStore>()(
           s.playback = { ...initialPlayback };
           const trip = s.trips[tripId];
           if (trip) {
+            if (!trip.aspectRatio) trip.aspectRatio = "16:9";
             // Trips loaded from storage (older schema) may lack vehicleType or
             // cached geometry — backfill so playback has arcs to follow.
             for (const sid of trip.segmentIds) {
@@ -419,6 +422,13 @@ export const useStore = create<TravelRecapStore>()(
         set((s) => {
           const trip = s.activeTripId ? s.trips[s.activeTripId] : null;
           if (trip) trip.mapStyleId = styleId;
+        });
+      },
+
+      setAspectRatio(ratio) {
+        set((s) => {
+          const trip = s.activeTripId ? s.trips[s.activeTripId] : null;
+          if (trip) trip.aspectRatio = ratio;
         });
       },
 
