@@ -1,10 +1,10 @@
 import { ImageResponse } from "next/og";
 
-export const size = { width: 32, height: 32 };
+export const size = { width: 64, height: 64 };
 export const contentType = "image/png";
 
-// Brand favicon: dark navy tile with a glowing sky-blue route arc and a head
-// node — a tiny echo of the OG image and the in-app reveal-gradient trail.
+// Brand favicon: dark navy tile with a sky-blue paper plane — the "fly the
+// route" theme, legible down to 16px. Rendered at 64px for crisp downscaling.
 export default function Icon() {
   return new ImageResponse(
     (
@@ -13,49 +13,18 @@ export default function Icon() {
           width: "100%",
           height: "100%",
           display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
           background:
-            "radial-gradient(20px 20px at 70% 10%, #15233f 0%, #0b1120 60%, #070b14 100%)",
-          borderRadius: 6,
-          position: "relative",
+            "radial-gradient(40px 40px at 70% 10%, #15233f 0%, #0b1120 60%, #070b14 100%)",
+          borderRadius: 12,
         }}
       >
-        {/* tail node */}
-        <div
-          style={{
-            position: "absolute",
-            left: 5,
-            top: 21,
-            width: 5,
-            height: 5,
-            borderRadius: 999,
-            background: "#1e3a5f",
-          }}
-        />
-        {/* mid node */}
-        <div
-          style={{
-            position: "absolute",
-            left: 13,
-            top: 14,
-            width: 5,
-            height: 5,
-            borderRadius: 999,
-            background: "#1e3a5f",
-          }}
-        />
-        {/* glowing head node */}
-        <div
-          style={{
-            position: "absolute",
-            left: 21,
-            top: 6,
-            width: 7,
-            height: 7,
-            borderRadius: 999,
-            background: "#38bdf8",
-            boxShadow: "0 0 6px 2px #38bdf8aa",
-          }}
-        />
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+          {/* paper plane: body + folded wing crease */}
+          <path d="M22 2 2 10.5l7.2 2.6L22 2Z" fill="#7dd3fc" />
+          <path d="M22 2 9.2 13.1l.6 7.4 3.4-4.7L22 2Z" fill="#38bdf8" />
+        </svg>
       </div>
     ),
     size
